@@ -28,7 +28,7 @@ export const tokenLabProvider = defineProvider({
   urls: {
     website: 'https://tokenlab.sh/',
     apiKey: 'https://tokenlab.sh/dashboard',
-    docs: 'https://docs.tokenlab.sh/',
+    docs: 'https://tokenlab.sh/docs',
     models: 'https://api.tokenlab.sh/v1/models',
   },
   defaultSettings: {
