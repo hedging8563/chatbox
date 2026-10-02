@@ -1,12 +1,14 @@
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
 import { extractReasoningMiddleware, wrapLanguageModel } from 'ai'
 import AbstractAISDKModel from '../../../models/abstract-ai-sdk'
-import { fetchRemoteModels } from '../../../models/openai-compatible'
+import { fetchRemoteModels, getOpenAICompatibleProviderOptionsKey } from '../../../models/openai-compatible'
 import type { CallChatCompletionOptions } from '../../../models/types'
 import { createFetchWithProxy } from '../../../models/utils/fetch-proxy'
+import { createOpenAIChatCompletionSseFetch } from '../../../models/utils/openai-chat-sse-termination'
 import type { ProviderModelInfo } from '../../../types'
 import type { ModelDependencies } from '../../../types/adapters'
 import { normalizeOpenAIApiHostAndPath } from '../../../utils/llm_utils'
+import { pickOpenAICompatibleReasoningOptions } from '../../../utils/reasoning-control'
 
 interface Options {
   apiKey: string
@@ -34,12 +36,22 @@ export default class CustomOpenAI extends AbstractAISDKModel {
     this.options = { ...options, apiHost, apiPath }
   }
 
-  protected getCallSettings() {
+  protected getCallSettings(options: CallChatCompletionOptions) {
+    const openAICompatibleOptions = pickOpenAICompatibleReasoningOptions(
+      this.options.model.modelId,
+      options.providerOptions
+    )
     return {
       temperature: this.options.temperature,
       topP: this.options.topP,
       maxOutputTokens: this.options.maxOutputTokens,
       stream: this.options.stream,
+      providerOptions: openAICompatibleOptions
+        ? {
+            openaiCompatible: openAICompatibleOptions,
+            [getOpenAICompatibleProviderOptionsKey(this.name)]: openAICompatibleOptions,
+          }
+        : undefined,
     }
   }
 
@@ -68,9 +80,10 @@ export default class CustomOpenAI extends AbstractAISDKModel {
 
   protected getChatModel(options: CallChatCompletionOptions) {
     const { apiHost, apiPath } = this.options
-    const provider = this.getProvider(options, async (_input, init) => {
-      return createFetchWithProxy(this.options.useProxy, this.dependencies)(`${apiHost}${apiPath}`, init)
-    })
+    const fetch = createOpenAIChatCompletionSseFetch(async (_input, init) =>
+      createFetchWithProxy(this.options.useProxy, this.dependencies)(`${apiHost}${apiPath}`, init)
+    )
+    const provider = this.getProvider(options, fetch)
     return wrapLanguageModel({
       model: provider.languageModel(this.options.model.modelId),
       middleware: extractReasoningMiddleware({ tagName: 'think' }),

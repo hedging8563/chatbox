@@ -1,5 +1,4 @@
-import * as Sentry from '@sentry/react'
-import { ApiError, NetworkError } from '@shared/models/errors'
+import { isExpectedGenerationError } from '@shared/models/error-classification'
 import type { Language, Message, ModelProvider, SessionSettings, Settings } from '@shared/types'
 import { createModel } from '@/adapters'
 import { languageNameMap } from '@/i18n/locales'
@@ -8,11 +7,13 @@ import { convertToModelMessages } from '@/packages/model-calls/message-utils'
 import * as promptFormat from '@/packages/prompts'
 import * as settingActions from '@/stores/settingActions'
 import { settingsStore } from '@/stores/settingsStore'
+import { reportError } from '@/utils/sentry'
 
 export interface SummaryGeneratorOptions {
   messages: Message[]
   language?: Language
   sessionSettings?: SessionSettings
+  prompt?: string
 }
 
 export interface SummaryResult {
@@ -37,7 +38,7 @@ export async function generateSummary(options: SummaryGeneratorOptions): Promise
   try {
     const model = await createModel(settings)
 
-    const promptMessages = promptFormat.summarizeConversation(messages, languageName)
+    const promptMessages = promptFormat.summarizeConversation(messages, languageName, options.prompt)
     const result = await generateText(model, promptMessages)
 
     const summary =
@@ -50,8 +51,11 @@ export async function generateSummary(options: SummaryGeneratorOptions): Promise
 
     return { success: true, summary: cleanedSummary }
   } catch (e: unknown) {
-    if (!(e instanceof ApiError || e instanceof NetworkError)) {
-      Sentry.captureException(e)
+    if (!isExpectedGenerationError(e)) {
+      reportError(e, {
+        domain: 'ai-generation',
+        operation: 'generate_summary',
+      })
     }
 
     return {
@@ -117,11 +121,12 @@ export function isSummaryGenerationAvailable(): boolean {
 }
 
 export interface StreamingSummaryOptions extends SummaryGeneratorOptions {
+  sessionId: string
   onStreamUpdate?: (text: string) => void
 }
 
 export async function generateSummaryWithStream(options: StreamingSummaryOptions): Promise<SummaryResult> {
-  const { messages, sessionSettings, onStreamUpdate } = options
+  const { sessionId, messages, sessionSettings, onStreamUpdate } = options
 
   if (messages.length === 0) {
     return { success: true, summary: '' }
@@ -136,10 +141,11 @@ export async function generateSummaryWithStream(options: StreamingSummaryOptions
   try {
     const model = await createModel(settings)
 
-    const promptMessages = promptFormat.summarizeConversation(messages, languageName)
+    const promptMessages = promptFormat.summarizeConversation(messages, languageName, options.prompt)
     const coreMessages = await convertToModelMessages(promptMessages, { modelSupportVision: model.isSupportVision() })
 
     const result = await model.chat(coreMessages, {
+      sessionId,
       onResultChange: (data) => {
         if (data.contentParts && onStreamUpdate) {
           const newText = data.contentParts
@@ -161,8 +167,11 @@ export async function generateSummaryWithStream(options: StreamingSummaryOptions
 
     return { success: true, summary: cleanedSummary }
   } catch (e: unknown) {
-    if (!(e instanceof ApiError || e instanceof NetworkError)) {
-      Sentry.captureException(e)
+    if (!isExpectedGenerationError(e)) {
+      reportError(e, {
+        domain: 'ai-generation',
+        operation: 'generate_summary_stream',
+      })
     }
 
     return {

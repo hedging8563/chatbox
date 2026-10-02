@@ -1,17 +1,3 @@
-import { type RemoteConfig, Theme } from '@shared/types'
-import { z } from 'zod'
-import { ErrorBoundary } from '@/components/common/ErrorBoundary'
-import Toasts from '@/components/common/Toasts'
-import DesktopDownloadReminder from '@/components/layout/DesktopDownloadReminder'
-import ExitFullscreenButton from '@/components/layout/ExitFullscreenButton'
-import useAppTheme from '@/hooks/useAppTheme'
-import { useSystemLanguageWhenInit } from '@/hooks/useDefaultSystemLanguage'
-import { useI18nEffect } from '@/hooks/useI18nEffect'
-import useNeedRoomForWinControls from '@/hooks/useNeedRoomForWinControls'
-import { useSidebarWidth } from '@/hooks/useScreenChange'
-import useShortcut from '@/hooks/useShortcut'
-import useVersion from '@/hooks/useVersion'
-import '@/modals'
 import NiceModal from '@ebay/nice-modal-react'
 import {
   Avatar,
@@ -36,36 +22,63 @@ import {
   Text,
   TextInput,
   Title,
-  Tooltip,
   useMantineColorScheme,
 } from '@mantine/core'
 import { Box, Grid } from '@mui/material'
 import CssBaseline from '@mui/material/CssBaseline'
 import { ThemeProvider } from '@mui/material/styles'
+import { type RemoteConfig, Theme } from '@shared/types'
 import { useQuery } from '@tanstack/react-query'
 import { createRootRoute, Outlet, useLocation } from '@tanstack/react-router'
-import { useAtomValue, useSetAtom } from 'jotai'
+import { useSetAtom } from 'jotai'
 import { useEffect, useMemo, useRef } from 'react'
+import { useTranslation } from 'react-i18next'
 import { trackJkViewEvent } from '@/analytics/jk'
 import { JK_EVENTS, JK_PAGE_NAMES } from '@/analytics/jk-events'
-import SettingsModal, { navigateToSettings } from '@/modals/Settings'
+import { createPageViewVisitGate } from '@/analytics/page-view-visit-gate'
+import { AppProviders } from '@/components/AppProviders'
+import { ErrorBoundary } from '@/components/common/ErrorBoundary'
+import Toasts from '@/components/common/Toasts'
+import DesktopDownloadReminder from '@/components/layout/DesktopDownloadReminder'
+import ExitFullscreenButton from '@/components/layout/ExitFullscreenButton'
+import useAppTheme from '@/hooks/useAppTheme'
+import { useSystemLanguageWhenInit } from '@/hooks/useDefaultSystemLanguage'
+import { useI18nEffect } from '@/hooks/useI18nEffect'
+import useNeedRoomForWinControls from '@/hooks/useNeedRoomForWinControls'
+import useScreenChange, { useSidebarWidth } from '@/hooks/useScreenChange'
+import useShortcut from '@/hooks/useShortcut'
+import useVersion from '@/hooks/useVersion'
+import '@/modals'
+import { rendererApplication } from '@/app/renderer-application'
+import DbSchemaGuardDialog from '@/components/DbSchemaGuardDialog'
+import SettingsModal from '@/modals/Settings'
+import { navigateToSettings } from '@/modals/settings-navigation'
 import { prefetchModelRegistry } from '@/packages/model-registry'
 import { getOS } from '@/packages/navigator'
 import * as remote from '@/packages/remote'
+import { sessionStartupRecovery, useSessionStartupLoadTarget } from '@/packages/session-startup-recovery'
 import PictureDialog from '@/pages/PictureDialog'
 import RemoteDialogWindow from '@/pages/RemoteDialogWindow'
 import SearchDialog from '@/pages/SearchDialog'
 import platform from '@/platform'
-import { router } from '@/router'
+import { getSettingsSearchParam, navigateToDynamicPath, router } from '@/router'
 import Sidebar from '@/Sidebar'
 import storage from '@/storage'
 import * as atoms from '@/stores/atoms'
-import { getSession, useSession } from '@/stores/chatStore'
+
+const useSession = (sessionId: string | null) => rendererApplication.sessionHooks.useSession(sessionId)
+
+function getSessionIdFromPathname(pathname: string): string | null {
+  if (!pathname.startsWith('/session/')) return null
+  const sessionId = pathname.slice('/session/'.length)
+  return sessionId && sessionId !== 'new' ? sessionId : null
+}
+
 import { initOnboardingStore, onboardingStore } from '@/stores/onboardingStore'
 import * as premiumActions from '@/stores/premiumActions'
 import * as settingActions from '@/stores/settingActions'
 import { initSettingsStore, settingsStore, useLanguage, useSettingsStore, useTheme } from '@/stores/settingsStore'
-import { getTaskSession } from '@/stores/taskSessionStore'
+import { add as addToast } from '@/stores/toastActions'
 import { useUIStore } from '@/stores/uiStore'
 import { CHATBOX_BUILD_CHANNEL, CHATBOX_BUILD_PLATFORM } from '@/variables'
 import { blobToDataUrl } from './image-creator/-components/constants'
@@ -73,13 +86,14 @@ import { blobToDataUrl } from './image-creator/-components/constants'
 function BackgroundImageOverlay() {
   const location = useLocation()
   const globalBackgroundImageKey = useSettingsStore((s) => s.backgroundImageKey)
+  const backgroundImageOpacity = useSettingsStore((s) => s.backgroundImageOpacity)
   const showSidebar = useUIStore((s) => s.showSidebar)
   const sidebarWidth = useSidebarWidth()
   const isRootPage = location.pathname === '/'
   const isSessionPage = location.pathname.startsWith('/session/') && location.pathname.length > '/session/'.length
-  const sessionId =
-    isSessionPage && location.pathname !== '/session/new' ? location.pathname.slice('/session/'.length) : null
-  const { session } = useSession(sessionId)
+  const sessionId = getSessionIdFromPathname(location.pathname)
+  const sessionLoadTarget = useSessionStartupLoadTarget(sessionId)
+  const { session } = useSession(sessionLoadTarget)
   const effectiveKey =
     session?.backgroundImage?.type === 'storage-key'
       ? session?.backgroundImage?.storageKey
@@ -108,11 +122,12 @@ function BackgroundImageOverlay() {
   return (
     <div className="absolute z-0 top-0 left-0 w-full h-full">
       <div
-        className="absolute top-0 left-0 w-full h-full bg-cover bg-center bg-no-repeat opacity-[0.16]"
+        className="absolute top-0 left-0 w-full h-full bg-cover bg-center bg-no-repeat"
         style={{
           backgroundImage: `
           url("${imageUrl.replace(/"/g, '%22')}")
         `,
+          opacity: backgroundImageOpacity,
         }}
       />
       <div className="hidden sm:block absolute top-0 left-0 w-full h-40 bg-gradient-to-b from-chatbox-background-primary from-0 to-transparent to-100%" />
@@ -125,7 +140,7 @@ function BackgroundImageOverlay() {
         />
       )}
 
-      <Flex h={48} className="sm:hidden bg-chatbox-background-primary" />
+      <Flex h={54} className="sm:hidden bg-chatbox-background-primary" />
 
       <Flex className="sm:hidden relative h-36 bg-gradient-to-b from-chatbox-background-primary from-0 to-transparent to-100%" />
 
@@ -134,11 +149,45 @@ function BackgroundImageOverlay() {
   )
 }
 
+function useHasBackgroundImage() {
+  const location = useLocation()
+  const globalBackgroundImageKey = useSettingsStore((s) => s.backgroundImageKey)
+  const isRootPage = location.pathname === '/'
+  const isSessionPage = location.pathname.startsWith('/session/') && location.pathname.length > '/session/'.length
+  const sessionId = getSessionIdFromPathname(location.pathname)
+  const sessionLoadTarget = useSessionStartupLoadTarget(sessionId)
+  const { session } = useSession(sessionLoadTarget)
+
+  return (isRootPage || isSessionPage) && Boolean(session?.backgroundImage ?? globalBackgroundImageKey)
+}
+
+function SettingsModalErrorFallback({ retry }: { error: Error; retry: () => void }) {
+  const { t } = useTranslation()
+  return (
+    <div className="pointer-events-none fixed inset-x-0 bottom-4 z-[400] flex justify-center px-4">
+      <div className="pointer-events-auto flex items-center gap-3 rounded-lg border border-solid border-chatbox-border-primary bg-chatbox-background-primary px-4 py-3 shadow-lg">
+        <Text size="sm">{t('Settings failed to load')}</Text>
+        <Button size="xs" variant="light" onClick={retry}>
+          {t('Try Again')}
+        </Button>
+      </div>
+    </div>
+  )
+}
+
 function Root() {
+  useScreenChange()
+  const { t } = useTranslation()
+  const startupTranslation = useRef(t)
+
   const { isExceeded, isExceededResolved } = useVersion()
   const location = useLocation()
+  const startupPathname = useRef(location.pathname)
   const spellCheck = useSettingsStore((state) => state.spellCheck)
   const language = useLanguage()
+  const hasBackgroundImage = useHasBackgroundImage()
+  const pageViewSessionLoadTarget = useSessionStartupLoadTarget(getSessionIdFromPathname(location.pathname))
+  const pageViewVisitGate = useRef(createPageViewVisitGate())
   const initialized = useRef(false)
 
   const setOpenAboutDialog = useUIStore((s) => s.setOpenAboutDialog)
@@ -160,8 +209,12 @@ function Root() {
         .catch(() => ({ setting_chatboxai_first: false }) as RemoteConfig)
       setRemoteConfig(async (prev) => ({ ...(await prev), ...remoteConfig }))
 
-      // Skip guide-related checks if already on guide or settings/mcp page
-      if (location.pathname === '/guide' || location.pathname === '/settings/mcp') {
+      // Skip guide-related checks if already on guide, dev tools, or settings/mcp page
+      if (
+        location.pathname === '/guide' ||
+        location.pathname.startsWith('/dev') ||
+        location.pathname === '/settings/mcp'
+      ) {
         initialized.current = true
         return
       }
@@ -217,18 +270,24 @@ function Root() {
   }, [_theme])
 
   useEffect(() => {
-    ;(() => {
-      const { startupPage } = settingsStore.getState()
-      const sid = JSON.parse(localStorage.getItem('_currentSessionIdCachedAtom') || '""') as string
-      if (sid && startupPage === 'session') {
-        router.navigate({
-          to: '/session/$sessionId',
-          params: { sessionId: sid },
-          search: (prev) => prev,
-          replace: true,
-        })
+    if (startupPathname.current !== '/') return
+    const { startupPage } = settingsStore.getState()
+    let sid = ''
+    try {
+      sid = JSON.parse(localStorage.getItem('_currentSessionIdCachedAtom') || '""') as string
+    } catch {
+      sid = ''
+    }
+    if (sid && startupPage === 'session') {
+      if (sessionStartupRecovery.shouldSkipAutoRestore(sid)) {
+        addToast(startupTranslation.current('Last chat failed to open. Opened the chat list instead.'))
+        return
       }
-    })()
+      navigateToDynamicPath({
+        to: `/session/${sid}`,
+        replace: true,
+      })
+    }
   }, [])
 
   useEffect(() => {
@@ -242,28 +301,17 @@ function Root() {
           const settingsPath = path.substring('/settings'.length)
           navigateToSettings(settingsPath || '/')
         } else {
-          router.navigate({ to: path as '/', search: (prev) => prev })
+          navigateToDynamicPath({ to: path })
         }
       })
     }
   }, [])
 
-  // Route → sidebar mode sync
-  const setSidebarMode = useUIStore((s) => s.setSidebarMode)
-  useEffect(() => {
-    const pathname = location.pathname
-    if (pathname === '/task' || pathname.startsWith('/task/')) {
-      setSidebarMode('task')
-    } else if (pathname === '/' || pathname.startsWith('/session/')) {
-      setSidebarMode('chat')
-    }
-    // Other routes (settings, copilots, about, etc.) don't change sidebarMode
-  }, [location.pathname, setSidebarMode])
-
   // Page view tracking
-  const settingsSearch = (location.search as Record<string, unknown>)?.settings as string | undefined
+  const settingsSearch = getSettingsSearchParam(location.search)
   useEffect(() => {
     const pathname = location.pathname
+    const shouldTrackPageView = pageViewVisitGate.current.shouldTrack(pathname, settingsSearch)
     let pageName: string | undefined
 
     // 桌面端 settings 以 modal 方式打开，pathname 不变，通过 search.settings 控制
@@ -271,8 +319,6 @@ function Root() {
       pageName = JK_PAGE_NAMES.SETTING_PAGE
     } else if (pathname === '/' || pathname.startsWith('/session/')) {
       pageName = JK_PAGE_NAMES.CHAT_PAGE
-    } else if (pathname === '/task' || pathname.startsWith('/task/')) {
-      pageName = JK_PAGE_NAMES.TASK_PAGE
     } else if (pathname.startsWith('/image-creator')) {
       pageName = JK_PAGE_NAMES.IMAGE_PAGE
     } else if (pathname.startsWith('/copilots')) {
@@ -285,19 +331,16 @@ function Root() {
       pageName = JK_PAGE_NAMES.ABOUT_PAGE
     }
 
-    if (!pageName) return
+    if (!pageName || !shouldTrackPageView) return
 
     const trackPageView = async () => {
       let content: string | undefined
 
-      if (pathname.startsWith('/session/')) {
-        const sessionId = pathname.slice('/session/'.length)
-        const session = await getSession(sessionId).catch(() => null)
+      if (pageViewSessionLoadTarget) {
+        const session = await rendererApplication.sessionQueryBridge
+          .getSession(pageViewSessionLoadTarget)
+          .catch(() => null)
         content = session?.name
-      } else if (pathname.startsWith('/task/') && pathname.length > '/task/'.length) {
-        const taskId = pathname.slice('/task/'.length)
-        const taskSession = await getTaskSession(taskId).catch(() => null)
-        content = taskSession?.name
       }
 
       trackJkViewEvent(JK_EVENTS.PAGE_VIEW, {
@@ -308,7 +351,7 @@ function Root() {
 
     // biome-ignore lint/nursery/noFloatingPromises: analytics tracking
     trackPageView()
-  }, [location.pathname, settingsSearch])
+  }, [location.pathname, pageViewSessionLoadTarget, settingsSearch])
 
   const { needRoomForMacWindowControls } = useNeedRoomForWinControls()
   useEffect(() => {
@@ -320,15 +363,26 @@ function Root() {
   }, [needRoomForMacWindowControls])
 
   return (
-    <Box className="box-border App relative" spellCheck={spellCheck} dir={language === 'ar' ? 'rtl' : 'ltr'}>
+    <Box
+      className="box-border App relative bg-chatbox-background-primary"
+      spellCheck={spellCheck}
+      dir={language === 'ar' ? 'rtl' : 'ltr'}
+    >
       <BackgroundImageOverlay />
-      {platform.type === 'desktop' && (getOS() === 'Windows' || getOS() === 'Linux') && <ExitFullscreenButton />}
+      {platform.isDesktopLike && (getOS() === 'Windows' || getOS() === 'Linux') && <ExitFullscreenButton />}
       <Grid container className="h-full relative z-[1]">
         <Sidebar />
         <Box
-          className="h-full w-full"
+          className="relative h-full w-full box-border"
           sx={{
             flexGrow: 1,
+            transition: (theme) =>
+              theme.transitions.create('padding', {
+                easing: showSidebar ? theme.transitions.easing.easeOut : theme.transitions.easing.sharp,
+                duration: showSidebar
+                  ? theme.transitions.duration.enteringScreen
+                  : theme.transitions.duration.leavingScreen,
+              }),
             ...(showSidebar
               ? language === 'ar'
                 ? { paddingRight: { sm: `${sidebarWidth}px` } }
@@ -336,9 +390,39 @@ function Root() {
               : {}),
           }}
         >
-          <ErrorBoundary name="main">
-            <Outlet />
-          </ErrorBoundary>
+          <Box
+            className="title-bar absolute inset-x-0 top-0 hidden sm:block"
+            sx={{ height: showSidebar ? '10px' : '5px' }}
+          />
+          <Box
+            className="h-full box-border"
+            sx={{
+              padding: { xs: 0, sm: showSidebar ? '10px 10px 10px 0' : '5px' },
+              transition: (theme) =>
+                theme.transitions.create('padding', {
+                  easing: showSidebar ? theme.transitions.easing.easeOut : theme.transitions.easing.sharp,
+                  duration: showSidebar
+                    ? theme.transitions.duration.enteringScreen
+                    : theme.transitions.duration.leavingScreen,
+                }),
+            }}
+          >
+            <Box
+              className={`h-full overflow-hidden border-[0.5px] border-solid border-chatbox-border-primary ${
+                hasBackgroundImage ? 'bg-transparent' : 'bg-chatbox-background-primary'
+              }`}
+              sx={{
+                borderRadius: { xs: 0, sm: '16px' },
+                boxShadow: { xs: 'none', sm: platform.type === 'web' ? 'none' : '0 0 22px rgba(0, 0, 0, 0.11)' },
+              }}
+            >
+              {/* Keyed per route so a crashing page stays contained to that page
+                  instead of latching the whole main area until the app restarts. */}
+              <ErrorBoundary key={location.pathname} name="main">
+                <Outlet />
+              </ErrorBoundary>
+            </Box>
+          </Box>
         </Box>
       </Grid>
       {/* 对话设置 */}
@@ -361,6 +445,8 @@ function Root() {
       <PictureDialog />
       {/* 似乎是从后端拉一个弹窗的配置 */}
       <RemoteDialogWindow />
+      {/* IndexedDB schema 与当前版本不匹配时的升级/刷新引导 */}
+      <DbSchemaGuardDialog />
       {/* 手机端举报内容 */}
       {/* <ReportContentDialog /> */}
       {/* 搜索 */}
@@ -369,7 +455,9 @@ function Root() {
       {/* 没有配置模型时的欢迎弹窗 */}
       {/* <WelcomeDialog /> */}
       <Toasts /> {/* mui */}
-      <SettingsModal />
+      <ErrorBoundary name="settings-modal" fallback={SettingsModalErrorFallback}>
+        <SettingsModal />
+      </ErrorBoundary>
     </Box>
   )
 }
@@ -378,6 +466,7 @@ const creteMantineTheme = (scale = 1) =>
   createTheme({
     /** Put your mantine theme override here */
     scale,
+    defaultRadius: 'lg',
     primaryColor: 'chatbox-brand',
     colors: {
       'chatbox-brand': colorsTuple(Array.from({ length: 10 }, () => 'var(--chatbox-tint-brand)')),
@@ -576,11 +665,15 @@ const creteMantineTheme = (scale = 1) =>
             height: rem('24px'),
             color: 'var(--chatbox-tint-secondary)',
           },
+          header: {
+            backgroundColor: 'var(--chatbox-background-primary)',
+          },
           content: {
             backgroundColor: 'var(--chatbox-background-primary)',
           },
           overlay: {
             '--overlay-bg': 'var(--chatbox-background-mask-overlay)',
+            '--overlay-filter': 'blur(4px)',
           },
         }),
       }),
@@ -620,11 +713,6 @@ const creteMantineTheme = (scale = 1) =>
           },
         }),
       }),
-      Tooltip: Tooltip.extend({
-        defaultProps: {
-          zIndex: 3000,
-        },
-      }),
       Popover: Popover.extend({
         defaultProps: {
           zIndex: 3000,
@@ -640,9 +728,6 @@ const creteMantineTheme = (scale = 1) =>
   })
 
 export const Route = createRootRoute({
-  validateSearch: z.object({
-    settings: z.string().optional(),
-  }),
   component: () => {
     useI18nEffect()
     premiumActions.useAutoValidate() // 每次启动都执行 license 检查，防止用户在lemonsqueezy管理页面中取消了当前设备的激活
@@ -661,14 +746,16 @@ export const Route = createRootRoute({
         theme={mantineTheme}
         defaultColorScheme={_theme === Theme.Dark ? 'dark' : _theme === Theme.Light ? 'light' : 'auto'}
       >
-        <ThemeProvider theme={theme}>
-          <CssBaseline />
-          <NiceModal.Provider>
-            <ErrorBoundary>
-              <Root />
-            </ErrorBoundary>
-          </NiceModal.Provider>
-        </ThemeProvider>
+        <AppProviders>
+          <ThemeProvider theme={theme}>
+            <CssBaseline />
+            <NiceModal.Provider>
+              <ErrorBoundary>
+                <Root />
+              </ErrorBoundary>
+            </NiceModal.Provider>
+          </ThemeProvider>
+        </AppProviders>
       </MantineProvider>
     )
   },

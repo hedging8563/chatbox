@@ -1,6 +1,7 @@
 import type { EmbeddingModel } from 'ai'
 import { CohereClient } from 'cohere-ai'
 import { getProviderSettings } from '../../shared/models'
+import { DashScopeRerankClient, isDashScopeHost } from './dashscope-rerank-client'
 import type { CallChatCompletionOptions, ModelInterface } from '../../shared/models/types'
 import { getChatboxAPIOrigin } from '../../shared/request/chatboxai_pool'
 import { SessionSettingsSchema } from '../../shared/types'
@@ -8,6 +9,7 @@ import { parseKnowledgeBaseModelString } from '../../shared/utils/knowledge-base
 import { createModel } from '../adapters'
 import { sentry } from '../adapters/sentry'
 import { cache } from '../cache'
+import { getDefaultEmbeddingModelString, getDefaultRerankModelString } from '../rag-default-models'
 import { getSettings, store } from '../store-node'
 import { getLogger } from '../util'
 import { getDatabase } from './db'
@@ -106,7 +108,8 @@ export async function getEmbeddingProvider(kbId: number) {
           throw error
         }
 
-        const embeddingModel = rs.rows[0].embedding_model as string
+        const embeddingModel =
+          (rs.rows[0].embedding_model as string | undefined) || getDefaultEmbeddingModelString(getSettings())
         if (!embeddingModel) {
           log.error(`kb:embedding:${kbId} embeddingModel not set`)
           const error = new Error('embeddingModel not set')
@@ -244,7 +247,8 @@ export async function getRerankProvider(kbId: number) {
           throw error
         }
 
-        const rerankModel = rs.rows[0].rerank_model as string
+        const rerankModel =
+          (rs.rows[0].rerank_model as string | undefined) || getDefaultRerankModelString(getSettings())
         if (!rerankModel) {
           return null
         }
@@ -274,10 +278,12 @@ export async function getRerankProvider(kbId: number) {
           token = store.get('settings.licenseKey')
         }
 
-        const client = new CohereClient({
-          environment: apiHost,
-          token,
-        })
+        const client = isDashScopeHost(apiHost)
+          ? new DashScopeRerankClient({ apiHost, token })
+          : new CohereClient({
+              environment: apiHost,
+              token,
+            })
         return { client, modelId }
       } catch (error: unknown) {
         const errMsg =

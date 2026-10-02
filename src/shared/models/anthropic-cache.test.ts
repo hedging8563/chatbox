@@ -18,6 +18,16 @@ describe('addAnthropicCacheControl', () => {
     const result = addAnthropicCacheControl(messages)
     expect(result).toHaveLength(1)
     expect(hasCacheControl(result[0])).toBe(true)
+    expect(result[0].providerOptions?.anthropic).toEqual({ cacheControl })
+  })
+
+  it.each(['5m', '1h'] as const)('adds an explicit %s TTL to cache control', (ttl) => {
+    const messages: ModelMessage[] = [{ role: 'user', content: [{ type: 'text', text: 'hello' }] }]
+
+    const result = addAnthropicCacheControl(messages, ttl)
+    const anthropic = result[0].providerOptions?.anthropic as Record<string, unknown>
+
+    expect(anthropic.cacheControl).toEqual({ type: 'ephemeral', ttl })
   })
 
   it('adds cache control to system message and last message', () => {
@@ -56,7 +66,9 @@ describe('addAnthropicCacheControl', () => {
       { role: 'assistant', content: [{ type: 'tool-call', toolCallId: 't1', toolName: 'search', input: {} }] },
       {
         role: 'tool',
-        content: [{ type: 'tool-result', toolCallId: 't1', toolName: 'search', output: { type: 'text', value: 'found' } }],
+        content: [
+          { type: 'tool-result', toolCallId: 't1', toolName: 'search', output: { type: 'text', value: 'found' } },
+        ],
       },
       { role: 'assistant', content: [{ type: 'text', text: 'response1' }] },
       { role: 'user', content: [{ type: 'text', text: 'second' }] },
@@ -75,9 +87,7 @@ describe('addAnthropicCacheControl', () => {
   })
 
   it('does not mutate original messages', () => {
-    const messages: ModelMessage[] = [
-      { role: 'user', content: [{ type: 'text', text: 'hello' }] },
-    ]
+    const messages: ModelMessage[] = [{ role: 'user', content: [{ type: 'text', text: 'hello' }] }]
     const result = addAnthropicCacheControl(messages)
     expect(messages[0].providerOptions).toBeUndefined()
     expect(hasCacheControl(result[0])).toBe(true)
@@ -98,9 +108,7 @@ describe('addAnthropicCacheControl', () => {
   })
 
   it('handles no system message with only one user message', () => {
-    const messages: ModelMessage[] = [
-      { role: 'user', content: [{ type: 'text', text: 'only one' }] },
-    ]
+    const messages: ModelMessage[] = [{ role: 'user', content: [{ type: 'text', text: 'only one' }] }]
     const result = addAnthropicCacheControl(messages)
     // Only 1 breakpoint (last message = only user message)
     expect(hasCacheControl(result[0])).toBe(true)

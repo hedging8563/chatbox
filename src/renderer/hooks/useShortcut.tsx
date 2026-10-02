@@ -1,14 +1,79 @@
 import { getDefaultStore } from 'jotai'
 import { useEffect } from 'react'
-import { navigateToSettings } from '@/modals/Settings'
+import { navigateToSettings } from '@/modals/settings-navigation'
 import { router } from '@/router'
 import { uiStore } from '@/stores/uiStore'
 import { getOS } from '../packages/navigator'
 import platform from '../platform'
 import { currentSessionIdAtom } from '../stores/atoms'
-import { switchToIndex, switchToNext } from '../stores/sessionActions'
+import { switchToIndex, switchToNext } from '../stores/session/crud'
+import { startNewThread } from '../stores/session/threads'
+import { settingsStore } from '../stores/settingsStore'
 import * as dom from './dom'
 import { useIsSmallScreen } from './useScreenChange'
+
+function isShortcutPressed(e: KeyboardEvent, shortcut: string) {
+  if (!shortcut) {
+    return false
+  }
+
+  const keys = shortcut.toLowerCase().split('+')
+  const key = keys[keys.length - 1]
+  const isMac = getOS() === 'Mac'
+  const expectsMod = keys.includes('mod')
+  const expectsCtrl = keys.includes('ctrl') || keys.includes('control') || (expectsMod && !isMac)
+  const expectsMeta = keys.includes('meta') || keys.includes('command') || (expectsMod && isMac)
+  const expectsAlt = keys.includes('alt') || keys.includes('option')
+  const expectsShift = keys.includes('shift')
+
+  return (
+    e.key.toLowerCase() === key &&
+    e.ctrlKey === expectsCtrl &&
+    e.metaKey === expectsMeta &&
+    e.altKey === expectsAlt &&
+    e.shiftKey === expectsShift
+  )
+}
+
+function getRouteSessionId() {
+  const sessionRouteMatch = router.state.location.pathname.match(/^\/session\/([^/]+)/)
+  return sessionRouteMatch?.[1] ? decodeURIComponent(sessionRouteMatch[1]) : null
+}
+
+function isVisible(element: HTMLElement) {
+  for (let current: HTMLElement | null = element; current; current = current.parentElement) {
+    if (current.hidden || current.getAttribute('aria-hidden') === 'true') {
+      return false
+    }
+    const style = window.getComputedStyle(current)
+    if (style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse') {
+      return false
+    }
+  }
+  return true
+}
+
+function hasVisibleDialog() {
+  return Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"]')).some(isVisible)
+}
+
+function isEditableElement(element: Element) {
+  return (
+    element instanceof HTMLElement &&
+    (element.tagName === 'INPUT' ||
+      element.tagName === 'TEXTAREA' ||
+      element.tagName === 'SELECT' ||
+      element.isContentEditable)
+  )
+}
+
+function shouldAutoFocusMessageInput() {
+  if (hasVisibleDialog()) {
+    return false
+  }
+  const active = document.activeElement
+  return !active || active.id === dom.messageInputID || !isEditableElement(active)
+}
 
 export default function useShortcut() {
   const isSmallScreen = useIsSmallScreen()
@@ -19,11 +84,11 @@ export default function useShortcut() {
     }
     const focusMessageInput = () => {
       // 大屏幕下，窗口显示时自动聚焦输入框
-      if (!isSmallScreen) {
+      if (!isSmallScreen && shouldAutoFocusMessageInput()) {
         dom.focusMessageInput()
       }
     }
-    const cancelOnFocus = platform.onWindowFocused(focusMessageInput)
+    const cancelOnFocus = platform.type === 'desktop' ? platform.onWindowFocused(focusMessageInput) : () => {}
     const cancelOnShow = platform.onWindowShow(focusMessageInput)
     window.addEventListener('keydown', handleKeyDown)
     return () => {
@@ -36,6 +101,7 @@ export default function useShortcut() {
   function keyboardShortcut(e: KeyboardEvent) {
     // 这里不用 e.key 是因为 alt、 option、shift 都会改变 e.key 的值
     const shift = e.shiftKey
+    const shortcuts = settingsStore.getState().shortcuts
 
     const ctrlKey = getOS() === 'Mac' ? e.metaKey : e.ctrlKey
 
@@ -58,8 +124,18 @@ export default function useShortcut() {
       })
       return
     }
-    // 创建新图片会话 CmdOrCtrl + Shift + N
-    if (e.key === 'n' && ctrlKey && shift) {
+    // 创建新话题 CmdOrCtrl + Shift + N
+    if (isShortcutPressed(e, shortcuts.messageListRefreshContext)) {
+      e.preventDefault()
+      const sid = getRouteSessionId()
+      if (sid) {
+        void startNewThread(sid)
+      }
+      return
+    }
+    // 创建新图片会话
+    if (isShortcutPressed(e, shortcuts.newPictureChat)) {
+      e.preventDefault()
       router.navigate({
         to: '/image-creator',
       })

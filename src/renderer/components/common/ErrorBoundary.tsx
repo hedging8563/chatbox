@@ -9,6 +9,7 @@ interface ErrorBoundaryProps {
   children: React.ReactNode
   fallback?: React.ComponentType<{ error: Error; retry: () => void }>
   name?: string
+  onError?: (error: Error) => void
 }
 
 /**
@@ -20,7 +21,12 @@ interface ErrorBoundaryProps {
  * - These errors are 100% reported to Sentry (see sentry_init.ts)
  * - Other errors are subject to 10% sampling
  */
-export function ErrorBoundary({ children, fallback: CustomFallback, name = 'ErrorBoundary' }: ErrorBoundaryProps) {
+export function ErrorBoundary({
+  children,
+  fallback: CustomFallback,
+  name = 'ErrorBoundary',
+  onError,
+}: ErrorBoundaryProps) {
   return (
     <Sentry.ErrorBoundary
       fallback={(fallbackProps) => {
@@ -38,8 +44,16 @@ export function ErrorBoundary({ children, fallback: CustomFallback, name = 'Erro
         return <DefaultErrorFallback error={errorObj} retry={resetError} />
       }}
       beforeCapture={(scope, error, componentStack) => {
+        onError?.(error instanceof Error ? error : new Error(String(error)))
+
         // Add custom context to Sentry
         scope.setTag('errorBoundary', name)
+        scope.setTag('component', 'ui')
+        scope.setTag('operation', name)
+        scope.setTag('error_domain', 'ui')
+        scope.setTag('error_operation', name)
+        scope.setTag('error_priority', 'critical')
+        scope.setTag('error_handled', 'true')
         scope.setLevel('error')
 
         // Add component stack information if available
@@ -80,7 +94,7 @@ function DefaultErrorFallback({ error, retry }: DefaultErrorFallbackProps) {
         <div className="space-y-3">
           <button
             onClick={retry}
-            className="w-full bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-md transition-colors"
+            className="w-full bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg transition-colors"
           >
             Try Again
           </button>
@@ -90,21 +104,21 @@ function DefaultErrorFallback({ error, retry }: DefaultErrorFallbackProps) {
               retry()
               router.navigate({ to: '/', replace: true })
             }}
-            className="w-full bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded-md transition-colors"
+            className="w-full bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded-lg transition-colors"
           >
             Reload App
           </button>
 
           <button
             onClick={() => setShowDetails(!showDetails)}
-            className="w-full text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 px-4 py-2 rounded-md transition-colors text-sm"
+            className="w-full text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 px-4 py-2 rounded-lg transition-colors text-sm"
           >
             {showDetails ? 'Hide Error' : 'Show Error'}
           </button>
         </div>
 
         {showDetails && (
-          <div className="mt-4 p-3 bg-gray-100 dark:bg-gray-700 rounded-md text-left">
+          <div className="mt-4 p-3 bg-gray-100 dark:bg-gray-700 rounded-lg text-left">
             <div className="text-sm text-gray-700 dark:text-gray-300 space-y-2">
               {error && (
                 <div>
@@ -137,6 +151,12 @@ export const SentryErrorBoundary = Sentry.withErrorBoundary(
     ),
     beforeCapture: (scope) => {
       scope.setTag('errorBoundary', 'sentry')
+      scope.setTag('component', 'ui')
+      scope.setTag('operation', 'sentry')
+      scope.setTag('error_domain', 'ui')
+      scope.setTag('error_operation', 'sentry')
+      scope.setTag('error_priority', 'critical')
+      scope.setTag('error_handled', 'true')
       scope.setLevel('error')
     },
   }

@@ -5,6 +5,7 @@ import { forwardRef, type PropsWithChildren } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { ImageModelGroup } from '@/hooks/useImageModelGroups'
 import { ScalableIcon } from './common/ScalableIcon'
+import { ModelIcon } from './icons/ModelIcon'
 import ProviderIcon from './icons/ProviderIcon'
 
 function ProviderGroupLabel({ providerId, name, isCustom }: { providerId: string; name: string; isCustom?: boolean }) {
@@ -61,7 +62,7 @@ export const ImageModelSelect = forwardRef<HTMLButtonElement, ImageModelSelectPr
           </button>
         </Combobox.Target>
 
-        <Combobox.Dropdown className="!rounded-2xl !border-[var(--chatbox-border-primary)] !shadow-lg overflow-hidden">
+        <Combobox.Dropdown className="!rounded-lg !border-[var(--chatbox-border-primary)] !shadow-lg overflow-hidden">
           <Combobox.Options mah={400} style={{ overflowY: 'auto' }} className="p-1">
             {modelGroups.length === 0 ? (
               <Text size="sm" c="dimmed" px="sm" py="xs">
@@ -75,8 +76,9 @@ export const ImageModelSelect = forwardRef<HTMLButtonElement, ImageModelSelectPr
                     <Combobox.Option
                       key={`${group.providerId}:${model.modelId}`}
                       value={JSON.stringify({ provider: group.providerId, modelId: model.modelId })}
-                      className="!rounded-lg"
+                      className="!rounded-lg flex items-center gap-2"
                     >
+                      <ModelIcon providerId={group.providerId} modelId={model.modelId} size={16} />
                       <Text size="sm">{model.displayName}</Text>
                     </Combobox.Option>
                   ))}

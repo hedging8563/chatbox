@@ -24,23 +24,15 @@ export async function handleMobileRequest(
         Accept: 'text/event-stream',
       }
 
-      const stream = createNativeReadableStream({
-        url,
-        method,
-        headers: streamHeaders,
-        body: body as string,
-      })
-
-      // Handle abort signal for stream cancellation
-      if (signal) {
-        const onAbort = () => {
-          try {
-            void stream.cancel('aborted')
-          } catch {}
-        }
-        if (signal.aborted) onAbort()
-        else signal.addEventListener('abort', onAbort, { once: true })
-      }
+      const stream = createNativeReadableStream(
+        {
+          url,
+          method,
+          headers: streamHeaders,
+          body: body as string,
+        },
+        { signal }
+      )
 
       // TODO: Once native plugin supports returning status/headers,
       // use them instead of hardcoded values
@@ -67,7 +59,7 @@ export async function handleMobileRequest(
   const rawData = typeof response.data === 'string' ? response.data : JSON.stringify(response.data)
   // Treat status 0 or < 200 as errors, in addition to >= 400
   if (response.status === 0 || response.status < 200 || response.status >= 400) {
-    throw new ApiError(`Status Code ${response.status}`, rawData)
+    throw new ApiError(`Status Code ${response.status}`, rawData, response.status)
   }
   const responseData = rawData
 

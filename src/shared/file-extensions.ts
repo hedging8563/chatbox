@@ -1,4 +1,10 @@
-export const officeExts = ['.pdf', '.docx', '.pptx', '.xlsx', '.odt', '.odp', '.ods']
+export const pdfExts = ['.pdf']
+
+export function isPdfFilePath(filePath: string) {
+  return pdfExts.some((ext) => filePath.toLowerCase().endsWith(ext))
+}
+
+export const officeExts = [...pdfExts, '.docx', '.pptx', '.xlsx', '.odt', '.odp', '.ods']
 
 export function isOfficeFilePath(filePath: string) {
   return officeExts.some((ext) => filePath.toLowerCase().endsWith(ext))
@@ -103,6 +109,11 @@ export const textExts = [
   '.cc', // C++ source file (alternative extension)
   '.cxx', // C++ source file (alternative extension)
   '.mjs', // JavaScript ES module file
+  '.typ', // Typst source file
+  '.patch', // Unified diff / patch file
+  '.diff', // Diff file
+  '.gitpatch', // Git patch file
+  '.gitignore', // Git ignore rules
 ]
 
 export function isTextFilePath(filePath: string) {
@@ -210,7 +221,20 @@ export function getFileAcceptConfig(): Record<string, string[]> {
     // Image files
     'image/*': ['.jpg', '.jpeg', '.png'],
     // Text files
-    'text/plain': ['.txt', '.log', '.nfo', '.ini', '.conf', '.config', '.env'],
+    'text/plain': [
+      '.txt',
+      '.log',
+      '.nfo',
+      '.ini',
+      '.conf',
+      '.config',
+      '.env',
+      '.typ',
+      '.patch',
+      '.diff',
+      '.gitpatch',
+      '.gitignore',
+    ],
     'text/markdown': ['.md', '.mdx'],
     'text/html': ['.html', '.htm', '.xhtml'],
     'text/xml': ['.xml'],
